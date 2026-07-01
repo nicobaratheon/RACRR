@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Auth ─────────────────────────────────────────────────────────────────
+
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  displayName String?
+  createdAt   DateTime @default(now())
+
+  posts            Post[]
+  postLikes        PostLike[]
+  groupsCreated    Group[]           @relation("GroupCreator")
+  groupMemberships GroupMembership[]
+  eventsOrganized  GroupEvent[]      @relation("EventOrganizer")
+  eventAttendances EventAttendance[]
+}
+
+// Single row per email — a fresh request-code overwrites it (used for the
+// 60s resend cooldown via requestedAt). Never stores the raw 6-digit code.
+model EmailOtp {
+  email       String   @id
+  codeHash    String
+  expiresAt   DateTime
+  attempts    Int      @default(0)
+  requestedAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+// ── Community: posts ─────────────────────────────────────────────────────
+
+model Post {
+  id            String   @id @default(cuid())
+  authorName    String
+  body          String
+  createdAt     DateTime @default(now())
+  lat           Float?
+  lng           Float?
+  imageUrl      String?
+  commentsCount Int      @default(0) // stub — no comments feature yet
+  groupId       String?
+  group         Group?   @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  authorUserId  String
+  author        User     @relation(fields: [authorUserId], references: [id])
+  likes         PostLike[]
+
+  @@index([createdAt])
+  @@index([groupId])
+}
+
+// Presence of a row = likedByMe; count(*) per postId = upvotes.
+model PostLike {
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@id([postId, userId])
+}
+
+// ── Community: groups ────────────────────────────────────────────────────
+
+model Group {
+  id            String   @id @default(cuid())
+  nameKa        String
+  districtKa    String
+  createdAt     DateTime @default(now())
+  creatorUserId String
+  creator       User     @relation("GroupCreator", fields: [creatorUserId], references: [id])
+
+  memberships GroupMembership[]
+  posts       Post[]
+  events      GroupEvent[]
+}
+
+// Presence of a row = joined; count(*) per groupId = members.
+model GroupMembership {
+  groupId  String
+  group    Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User     @relation(fields: [userId], references: [id])
+  joinedAt DateTime @default(now())
+
+  @@id([groupId, userId])
+}
+
+// ── Community: events ────────────────────────────────────────────────────
+
+model GroupEvent {
+  id              String    @id @default(cuid())
+  groupId         String?   // null = standalone Races-tab event
+  group           Group?    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  title           String
+  place           String
+  when            DateTime
+  createdAt       DateTime  @default(now())
+  organizerUserId String
+  organizer       User      @relation("EventOrganizer", fields: [organizerUserId], references: [id])
+
+  attendances EventAttendance[]
+
+  @@index([groupId])
+  @@index([when])
+}
+
+// Presence of a row = going; count(*) per eventId = attendees.
+model EventAttendance {
+  eventId  String
+  event    GroupEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User       @relation(fields: [userId], references: [id])
+  goingAt  DateTime   @default(now())
+
+  @@id([eventId, userId])
+}
